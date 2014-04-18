@@ -48,34 +48,47 @@
 	*		19			Volume -											*
 	*************************************************************************/
 #include "msp430g2553.h"
+#include "uart_fifo.h"					//Your UART header
+#include "printf.h"
 
 #define T05 300
 #define T65 T05*13
 #define T2 T05*4
 #define T3 T05*6
 
-unsigned int irSignal = 0;
-unsigned int bitCounter = 0;
-unsigned int key5 = 0;
-int run = 0x01;
+unsigned int irSignal = 0, bitCounter = 0;
+unsigned int flag = 0;
+unsigned int devRun = 0x01;
+int so[13] = { 0xC0,0xF9,0xA4,0xB0,0x99,0x92,0x82,0xF8,0x80,0x90,0x7F,0xFF,0xBF };
 
+void showled(int a, int b)
+{
+	P2OUT = so[a];
+	P1OUT |= b;
+	__delay_cycles(5000);
+	P1OUT &=~ b;
+}
 void main(void) {
 	WDTCTL = WDTPW + WDTHOLD;
-	BCSCTL1 = CALBC1_1MHZ;
-	DCOCTL = CALDCO_1MHZ;
-
+	BCSCTL1 = CALBC1_8MHZ;
+	DCOCTL = CALDCO_8MHZ;
+//	P1DIR |=0xF0;
 	P1DIR &= ~BIT1;
 	P1SEL = BIT1;
 
 	P2OUT &= ~0xFF;
 	P2DIR |= 0xFF;
 	P2SEL =0;
-	TACTL = TASSEL_2 | MC_2;
+	//TACTL = TASSEL_2 | MC_2;
+	TACTL = TASSEL_2 | MC_2 | ID_3;
 	CCTL0 = CM_2 | CCIS_0 | CAP | CCIE;
+	__enable_interrupt();
 
-	__bis_SR_register(LPM0_bits + GIE);
+	//__bis_SR_register(LPM0_bits + GIE);
+	uart_init();
+	uart_printf(">>>>>>>>>>>welcome to program control ir remote<<<<<<<<<<< \r\n");
 }
-
+#ifndef _debug
 #pragma vector=TIMER0_A0_VECTOR
 __interrupt void Timer_A(void) {
 	if (CCTL0 & CAP) {
@@ -89,9 +102,11 @@ __interrupt void Timer_A(void) {
 			switch (irSignal & 0x001F) {
 				case 21: 	// power off all led P2
 					P2OUT = 0x00;
+					uart_printf("_turn off all led \r\n");
 					break;
 				case 20: 	// mute on all led P2
 					P2OUT |= 0xFF;
+					uart_printf("_turn on all led \r\n");
 					break;
 				case 3:		// digit key 4
 					P2OUT |= 0x0f;
@@ -100,25 +115,46 @@ __interrupt void Timer_A(void) {
 					P2OUT |= 0xf0;
 					break;
 				case 1:		// digit key 2
-					P2OUT |= 0xFF;
+					for(;;){
+							_delay_cycles(500000);
+							P2OUT =~ devRun;
+							devRun >>=1;
+							if(devRun < 0x01)devRun = 0x80;
+							uart_printf("_debug move off right: %u\r\n",devRun);
+							break;
+						}
 					break;
 				case 7:		//degit key 8
-					P2OUT &= ~0xFF;
-					break;
-				case 9:		//degit key 8
-					P1OUT |= BIT0;
+					for(;;){
+							_delay_cycles(500000);
+							P2OUT = devRun;
+							devRun >>=1;
+							if(devRun < 0x01)devRun = 0x80;
+							uart_printf("_debug move right: %u\r\n",devRun);
+							break;
+						}
 					break;
 				case 4:		//degit key 5
 					for(;;){
-						if(key5 == 0){
-								_delay_cycles(500000);
-								P2OUT = run;
-								run <<=1;
-								if(run>0x80)run = 0x01;
-								key5++;
-							}else if(key5==3)break;
+							_delay_cycles(500000);
+							P2OUT = devRun;
+							devRun <<=1;
+							if(devRun > 0x80)devRun = 0x01;
+							uart_printf("_debug move left: %u\r\n",devRun);
+							break;
 						}
 					break;
+#ifdef _debug_key
+				case 0:		//degit key 1
+					for(;;){
+							showled(2,0x10);
+							showled(0,0x20);
+							showled(1,0x40);
+							showled(4,0x80);
+					//		break;
+						}
+					break;
+#endif
 			}
 			irSignal = 0;
 			CCTL0 |= CAP;
@@ -135,3 +171,4 @@ __interrupt void Timer_A(void) {
 		}
 	}
 }
+#endif
